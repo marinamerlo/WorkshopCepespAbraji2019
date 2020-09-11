@@ -1,0 +1,210 @@
+---
+title: "Workshop API CepespData - Folha de Respostas"
+author: "Equipe CepespData/FGV"
+date: "28 de junho de 2019"
+output: pdf_document
+urlcolor: blue
+---
+```{r Apresentação, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(cepespR)
+library(dplyr)
+```
+
+## 5. Exercícios
+
+###5.1. Quantos votos na legenda o PSL teve em 2018 para Deputado Federal? E em 2014? Houve aumento?
+```{r,warning=F,message=F,echo=T,cache=T}
+lista.colunas <- list("ANO_ELEICAO","NUMERO_CANDIDATO","QTDE_VOTOS")
+
+votosPSL <- get_elections(year="2014,2018",
+                          position="Deputado Federal",
+                          regional_aggregation="Brasil",
+                          candidate_number = "17",
+                          columns_list = lista.colunas)
+print(votosPSL)
+```
+
+###5.2. Quantas governadoras foram eleitas nas últimas quatro eleições?
+
+```{r,warning=F,message=F,echo=T,cache=T}
+lista.colunas <- list("ANO_ELEICAO","SIGLA_UE","NUMERO_CANDIDATO","QTDE_VOTOS","DESCRICAO_SEXO")
+
+governadoras <- get_elections(year="2006,2010,2014,2018",
+                              position="Governador",
+                              regional_aggregation="Brasil",
+                              only_elected = T,
+                              columns_list = lista.colunas)
+
+governadoras %>%
+  group_by(DESCRICAO_SEXO) %>%
+  summarise(n = n())
+
+```
+
+###5.3. Quantas mulheres negras (pretas ou pardas) concorreram ao cargo de prefeita em 2016 no Brasil?
+
+```{r,warning=F,message=F,echo=T,cache=T}
+lista.colunas <- list("ANO_ELEICAO","DESCRICAO_COR_RACA","QTDE_VOTOS","DESCRICAO_SEXO")
+
+prefeitasnegras <- get_elections(year="2016",
+                                 position="Prefeito",
+                                 columns_list = lista.colunas)
+
+prefeitasnegras %>%
+  filter(DESCRICAO_COR_RACA %in% c("PRETA","PARDA")) %>%
+  group_by(DESCRICAO_SEXO,DESCRICAO_COR_RACA) %>%
+  summarise(n = n())
+
+```
+
+
+###5.4. Quantas pessoas que eram filiadas ao PCO no Estado de Alagoas se desfiliaram do partido ou tiveram sua filiação cancelada?
+
+```{r,warning=F,message=F,echo=T,cache=T}
+
+filiadosAL <- get_filiates(state='AL',party ='PCO')
+
+filiadosAL %>%
+  group_by(SITUACAO_REGISTRO) %>%
+  summarise(n = n())
+  
+
+```
+
+
+###5.5. Considerando os candidatos a vereador no Rio Grande do Sul em 2012, qual é o partido com o maior valor total de bens declarados? 
+
+```{r,warning=F,message=F,echo=T,cache=T}
+lista.colunas <- list("NUMERO_PARTIDO","SIGLA_PARTIDO","VALOR_BEM")
+
+bens_vereadores <- get_assets(year=2012,
+                              state = "RS",
+                              columns_list = lista.colunas)
+
+bens_vereadores %>%
+  mutate(valor = gsub("[.]","",VALOR_BEM), #remove o ponto do numeral
+         valor = as.numeric(sub(",", ".", valor))) %>% #transforma a vírgula em ponto 
+  group_by(SIGLA_PARTIDO) %>%
+  summarise(total = sum(valor)) %>%
+  top_n(1,total)
+  
+```
+
+
+
+
+## 6. Trabalhando com outras bases de dados a partir do código do IBGE
+
+### 6.1. Baixe os dados do Programa Bolsa Família (pbf_2016.csv) e abra no R. Dica: veja como utilizar a função *read.csv2()*. Inspecione quais são as variáveis no banco.
+
+```{r,warning=F,message=F,echo=T,cache=T}
+pbf <- read.csv2("pbf_2016.csv",stringsAsFactors = F)
+glimpse(pbf)
+```
+
+### 6.2. Baixe os dados da população do IBGE (pbf_2016.csv)e abra no R. Inspecione quais são as variáveis no banco.
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+pop <- read.csv2("pop_ibge_2016.csv",stringsAsFactors = F)
+glimpse(pop)
+```
+
+### 6.3. Utilizando o cepespR, construa um banco de dados que tenha a quantidade de votos por município por partido para o cargo de prefeito no ano de 2016
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+ lista.colunas <- list("NUMERO_CANDIDATO","QTDE_VOTOS","COD_MUN_IBGE")
+
+votos <- get_votes(year=2016,
+                   position = "Prefeito",
+                   columns_list = lista.colunas)
+```
+
+### 6.4. Crie uma variável no banco de votos que indique a porcentagem de votos recebida por partido por município.
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+#fazendo os totais de votos por município 
+votos_totais <- votos %>%
+  group_by(COD_MUN_IBGE) %>%
+  summarise(votosmun = sum(QTDE_VOTOS))
+
+#juntando os totais e criando a variável com a porcentagem
+votos <- votos %>%
+  left_join(votos_totais,by="COD_MUN_IBGE") %>%
+  mutate(pct_votos = 100*(QTDE_VOTOS/votosmun))
+
+summary(votos$pct_votos)
+```
+  
+### 6.5. Crie um novo banco de dados que junte o banco de população com os dados do Bolsa Família utilizando o código do IBGE. 
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+#vendo como é a variável do código do IBGE de cada um dos bancos
+summary(pbf$cod_ibge)
+summary(pop$cod_mun)
+#ambas são numéricas, mas há diferença no número de digítos
+#o banco com os dados da população possui um dígito a mais. 
+
+#criando uma nova variável do código com 6 dígitos, para ficar igual ao do PBF:
+pop <- pop %>%
+  mutate(cod_mun2 = as.numeric(substr(cod_mun, start = 1, stop = 6)))
+
+#fazendo o join
+bd_join <- pop %>%
+  left_join(pbf, by = c("cod_mun2" = "cod_ibge"))
+
+```
+ 
+ 
+### 6.6. Verifique se o join foi feito corretamente - o novo banco deve ter o mesmo número de linhas que os bancos originais. Também explore o novo banco com o comando *summary()*. Não podemos ter NA's! 
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+#testando se não perdemos ou ganhamos linhas no join
+nrow(bd_join) == nrow(pbf)
+nrow(bd_join) == nrow(pop)
+
+#vendo se todas as variáveis estão completas
+summary(bd_join)
+```
+ 
+### 6.7. Nesse novo banco, crie uma variável que indique o número de famílias benefiárias a cada 1000 habitantes. 
+```{r,warning=F,message=F,echo=T,cache=T}
+bd_join <- bd_join %>%
+  mutate(familias_1000hab = (qtd_familias_beneficiarias_bolsa_familia/pop_estimada)*1000)
+
+summary(bd_join$familias_1000hab)
+```
+ 
+### 6.8. Agora, crie um novo banco de dados que junte o banco com a variável do item 7 ao banco com as porcentagens de voto. Confirme que o novo banco tem o mesmo número de observações que o original.
+ 
+```{r,warning=F,message=F,echo=T,cache=T}
+
+votos_completo <- votos %>%
+  mutate(cod_mun = COD_MUN_IBGE) %>% 
+  left_join(bd_join, by="cod_mun")
+
+nrow(votos_completo) == nrow(votos)
+```
+ 
+### 6.9. Filtre o banco com todas as variáveis para que tenha somente candidatos ao PT, e faça um gráfico de dispersão simples (*plot()*) entre a taxa de famílias beneficiárias e a porcentagem de votos para candidatos. Parece haver correlação?
+ 
+```{r,warning=F,message=F,echo=T,cache=T,out.width = '95%',fig.align='center'}
+votosPT <- votos_completo %>%
+  filter(NUMERO_CANDIDATO == 13)
+
+plot(votosPT$familias_1000hab,votosPT$pct_votos)
+
+```
+
+\vspace*{\fill}
+\raggedleft
+![](logocepesp.png)\ 
+
+Rua Itapeva, 286 - 10° andar - São Paulo/SP - CEP: 01332-000
+
+Telefone:(11) 3799 - 3228 
+
+E-mail: cepesp@fgv.br / midia.cepesp@fgv.br
+
+
+[Twitter](https://twitter.com/cepesp) / [Facebook](https://www.facebook.com/cepesp.fgv) / [Instagram](https://www.instagram.com/cepesp) / [GitHub](https://github.com/Cepesp-Fgv/) 
